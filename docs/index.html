@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gesture Studio</title>
+  <meta name="description" content="MediaPipe로 웹캠 손 제스처를 인식하고, 나만의 제스처를 브라우저에서 바로 수집·훈련·추론하는 데모">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✋</text></svg>">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <div>
+      <h1>Gesture Studio</h1>
+      <p class="sub">MediaPipe 손 제스처 인식 · 나만의 제스처를 브라우저에서 바로 수집 → 훈련 → 추론</p>
+    </div>
+    <a class="repo" href="https://github.com/juwookim/mediapipe-hand-gesture" target="_blank" rel="noopener">GitHub</a>
+  </header>
+
+  <main class="layout">
+    <section class="stage-wrap">
+      <div class="stage">
+        <canvas id="stage" width="640" height="480"></canvas>
+        <div id="startOverlay" class="start-overlay">
+          <button id="startBtn" class="primary big">📷 카메라 켜기</button>
+          <p id="startMsg" class="muted">영상은 브라우저 안에서만 처리되고 어디에도 전송되지 않습니다.</p>
+        </div>
+      </div>
+      <div class="stage-controls">
+        <label class="ctl">이모지 크기 <input id="emojiSize" type="range" min="16" max="200" value="48"> <span id="emojiSizeVal">48px</span></label>
+        <label class="ctl">이모지 색
+          <select id="emojiTint">
+            <option value="pink">핑크</option>
+            <option value="none">원래 색</option>
+          </select>
+        </label>
+      </div>
+      <p id="status" class="muted status"></p>
+    </section>
+
+    <aside class="panel">
+      <nav class="tabs" role="tablist">
+        <button class="tab active" data-tab="builtin" role="tab">기본 제스처</button>
+        <button class="tab" data-tab="collect" role="tab">1. 수집</button>
+        <button class="tab" data-tab="train" role="tab">2. 훈련</button>
+        <button class="tab" data-tab="infer" role="tab">3. 추론</button>
+      </nav>
+
+      <!-- 기본 제스처 -->
+      <section class="tab-body" data-body="builtin">
+        <p class="muted">MediaPipe Gesture Recognizer의 기본 7가지 제스처를 인식합니다.</p>
+        <div id="builtinEmoji" class="big-emoji"></div>
+        <div id="builtinResult" class="result">손을 보여주세요</div>
+        <ul class="gesture-list" id="builtinList"></ul>
+      </section>
+
+      <!-- 수집 -->
+      <section class="tab-body hidden" data-body="collect">
+        <label class="field-label" for="labelInput">제스처 라벨</label>
+        <div class="row">
+          <input id="labelInput" type="text" placeholder="예: heart, ok, none">
+          <button id="addLabelBtn">추가</button>
+        </div>
+        <ul id="labelList" class="label-list"></ul>
+
+        <div class="row between">
+          <span class="field-label">라벨 이모지</span>
+          <div class="row tight">
+            <input id="emojiInput" class="emoji-input" type="text" maxlength="8">
+            <button id="emojiApplyBtn">적용</button>
+            <button id="emojiClearBtn">지우기</button>
+          </div>
+        </div>
+        <div id="palette" class="palette"></div>
+
+        <button id="deleteLabelBtn" class="ghost danger full">선택한 라벨과 데이터 삭제</button>
+
+        <div class="row between">
+          <span>녹화 1회당 자동 정지 개수</span>
+          <input id="targetInput" type="number" min="10" max="5000" step="50" value="300">
+        </div>
+        <button id="recBtn" class="primary full big">● 녹화 시작 (Space)</button>
+        <progress id="recProgress" max="300" value="0"></progress>
+
+        <details class="data-tools">
+          <summary>데이터 가져오기 / 내보내기</summary>
+          <div class="row wrap">
+            <button id="exportBtn">JSON 내보내기</button>
+            <label class="button">JSON / CSV 가져오기<input id="importInput" type="file" accept=".json,.csv" hidden></label>
+            <button id="clearAllBtn" class="danger">전체 삭제</button>
+          </div>
+          <p class="muted small">파이썬 <code>gesture_studio.py</code>가 만든 <code>dataset/custom_gestures.csv</code>도 그대로 가져올 수 있습니다.</p>
+        </details>
+
+        <p class="muted small tip">
+          팁<br>
+          · 'none'(아무 제스처 아닌 손) 라벨을 꼭 함께 모으세요.<br>
+          · 라벨당 200~500개, 녹화 중 손 각도·거리를 조금씩 바꾸세요.<br>
+          · 왼손/오른손은 자동으로 통일되니 한 손으로만 모아도 됩니다.<br>
+          · 데이터는 이 브라우저(localStorage)에만 저장됩니다.
+        </p>
+      </section>
+
+      <!-- 훈련 -->
+      <section class="tab-body hidden" data-body="train">
+        <button id="trainBtn" class="primary full big">훈련 시작</button>
+        <progress id="trainProgress" max="1" value="0"></progress>
+        <div id="trainResult" class="result"></div>
+        <pre id="trainLog" class="log"></pre>
+      </section>
+
+      <!-- 추론 -->
+      <section class="tab-body hidden" data-body="infer">
+        <p id="modelStatus" class="muted"></p>
+        <div class="row between">
+          <span>최소 확신도</span><span id="confVal">0.70</span>
+        </div>
+        <input id="confInput" type="range" min="0" max="1" step="0.01" value="0.7">
+        <div id="inferEmoji" class="big-emoji"></div>
+        <div id="inferResult" class="result">손을 보여주세요</div>
+      </section>
+    </aside>
+  </main>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
