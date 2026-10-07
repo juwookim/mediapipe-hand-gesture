@@ -1,4 +1,5 @@
 """커스텀 제스처 수집/훈련/추론에서 공통으로 쓰는 랜드마크 → 특징 벡터 변환"""
+import json
 import os
 
 import cv2
@@ -10,11 +11,26 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 HAND_MODEL_PATH = os.path.join(BASE_DIR, "hand_landmarker.task")
 DATASET_PATH = os.path.join(BASE_DIR, "dataset", "custom_gestures.csv")
 CLASSIFIER_PATH = os.path.join(BASE_DIR, "custom_gesture_model.joblib")
+EMOJI_PATH = os.path.join(BASE_DIR, "dataset", "label_emojis.json")
 
 NUM_FEATURES = 21 * 3
 CSV_HEADER = ["label"] + [f"{axis}{i}" for i in range(21) for axis in "xyz"]
 
 HAND_CONNECTIONS = vision.HandLandmarksConnections.HAND_CONNECTIONS
+
+
+def load_emojis():
+    """라벨 → 이모지 매핑 (예: {"GOOD": "👍"})"""
+    if not os.path.exists(EMOJI_PATH):
+        return {}
+    with open(EMOJI_PATH, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def save_emojis(emojis):
+    os.makedirs(os.path.dirname(EMOJI_PATH), exist_ok=True)
+    with open(EMOJI_PATH, "w", encoding="utf-8") as f:
+        json.dump(emojis, f, ensure_ascii=False, indent=2)
 
 
 def create_hand_landmarker(num_hands):

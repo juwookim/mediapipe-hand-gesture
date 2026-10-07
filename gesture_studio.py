@@ -18,28 +18,71 @@ from tkinter.scrolledtext import ScrolledText
 import cv2
 import joblib
 import mediapipe as mp
-from PIL import Image, ImageDraw, ImageFont, ImageTk
+from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageTk
 
 from gesture_features import (CLASSIFIER_PATH, CSV_HEADER, DATASET_PATH,
-                              create_hand_landmarker, draw_hand, landmarks_to_features)
+                              create_hand_landmarker, draw_hand, landmarks_to_features,
+                              load_emojis, save_emojis)
 from train_gestures import train
 
 CAMERA_INDEX = 0
 FONT_PATH = r"C:\Windows\Fonts\malgun.ttf"  # 영상 위에 한글 라벨을 그리기 위한 폰트
+EMOJI_FONT_PATH = r"C:\Windows\Fonts\seguiemj.ttf"  # 영상 위에 컬러 이모지를 그리기 위한 폰트
 DEFAULT_TARGET = 300
+DEFAULT_EMOJI_SIZE = 48  # 영상 위 이모지 크기(px), [추론] 탭 슬라이더로 조절
+# 이모지 색: (어두운 부분, 중간, 밝은 부분) 3색으로 물들임. 원래 색으로 보려면 None
+EMOJI_TINT = ((120, 10, 70), (255, 80, 170), (255, 205, 230))  # 핑크
+EMOJI_PALETTE = "👍👎✌👌✊✋🖐☝🤙🤘🤟👋🙏❤"
 
 TAB_COLLECT, TAB_TRAIN, TAB_INFER = 0, 1, 2
 
 _fonts = {}
 
 
-def font(size):
-    if size not in _fonts:
+def font(size, path=FONT_PATH):
+    if (path, size) not in _fonts:
         try:
-            _fonts[size] = ImageFont.truetype(FONT_PATH, size)
+            _fonts[path, size] = ImageFont.truetype(path, size)
         except OSError:
-            _fonts[size] = ImageFont.load_default()
-    return _fonts[size]
+            _fonts[path, size] = ImageFont.load_default()
+    return _fonts[path, size]
+
+
+def clean_emoji(text):
+    # 이모지 변형 선택자(U+FE0F)는 PIL에서 빈칸으로 그려지므로 제거
+    return text.replace("\ufe0f", "").strip()
+
+
+_emoji_images = {}
+
+
+def render_emoji(emoji, size):
+    """이모지를 투명 배경 RGBA 이미지로 그림 (EMOJI_TINT 색으로 물들임)"""
+    key = (emoji, size)
+    if key not in _emoji_images:
+        emoji_font = font(size, EMOJI_FONT_PATH)
+        left, top, right, bottom = emoji_font.getbbox(emoji)
+        image = Image.new("RGBA", (max(right - left, 1), max(bottom - top, 1)), (0, 0, 0, 0))
+        ImageDraw.Draw(image).text((-left, -top), emoji, font=emoji_font, embedded_color=True)
+        if EMOJI_TINT:
+            dark, mid, light = EMOJI_TINT
+            tinted = ImageOps.colorize(image.convert("L"), black=dark, mid=mid, white=light).convert("RGBA")
+            tinted.putalpha(image.getchannel("A"))
+            image = tinted
+        _emoji_images[key] = image
+    return _emoji_images[key]
+
+
+def draw_overlay(image, pos, text, color, emoji="", size=28, emoji_size=DEFAULT_EMOJI_SIZE):
+    """[이모지] + 한글 텍스트를 한 줄로 그림 (텍스트는 이모지 높이의 가운데에 맞춤)"""
+    x, y = pos
+    if emoji:
+        emoji_image = render_emoji(emoji, emoji_size)
+        image.alpha_composite(emoji_image, (x, y))
+        x += emoji_image.width + 6
+        y += max((emoji_image.height - size) // 2, 0)
+    ImageDraw.Draw(image).text((x, y), text, font=font(size), fill=color,
+                               stroke_width=2, stroke_fill=(0, 0, 0))
 
 
 def read_dataset_rows():
@@ -90,6 +133,7 @@ class GestureStudio:
         # 수집 상태
         self.counts = Counter(row[0] for row in read_dataset_rows())
         self.labels = list(self.counts)
+        self.emojis = load_emojis()
         self.recording = False
         self.session_count = 0
         self.pending_rows = []
@@ -156,6 +200,24 @@ class GestureStudio:
         self.label_list.pack(fill="both", expand=True)
         self.label_list.bind("<<ListboxSelect>>", lambda e: self.stop_recording())
 
+        emoji_row = ttk.Frame(tab)
+        emoji_row.pack(fill="x", pady=(6, 2))
+        ttk.Label(emoji_row, text="선택한 라벨의 이모지").pack(side="left")
+        ttk.Button(emoji_row, text="지우기", width=6,
+                   command=lambda: self.set_emoji("")).pack(side="right")
+        ttk.Button(emoji_row, text="적용", width=5,
+                   command=lambda: self.set_emoji(self.emoji_entry.get())).pack(side="right", padx=(4, 4))
+        self.emoji_entry = ttk.Entry(emoji_row, width=5, font=("Segoe UI Emoji", 11))
+        self.emoji_entry.pack(side="right")
+        self.emoji_entry.bind("<Return>", lambda e: self.set_emoji(self.emoji_entry.get()))
+
+        palette = ttk.Frame(tab)
+        palette.pack(fill="x")
+        for i, emoji in enumerate(EMOJI_PALETTE):
+            tk.Button(palette, text=emoji, font=("Segoe UI Emoji", 12), relief="flat", width=2,
+                      command=lambda e=emoji: self.set_emoji(e)).grid(row=i // 7, column=i % 7)
+        ttk.Label(tab, foreground="gray", text="다른 이모지는 입력칸에서 Win + . 으로 고르세요").pack(anchor="w")
+
         ttk.Button(tab, text="선택한 라벨과 데이터 삭제", command=self.delete_label).pack(fill="x", pady=(4, 10))
 
         target_row = ttk.Frame(tab)
@@ -206,7 +268,19 @@ class GestureStudio:
         ttk.Scale(tab, from_=0.0, to=1.0, variable=self.conf_var,
                   command=lambda v: self.conf_label.config(text=f"{float(v):.2f}")).pack(fill="x")
 
+        size_row = ttk.Frame(tab)
+        size_row.pack(fill="x", pady=(10, 0))
+        ttk.Label(size_row, text="이모지 크기").pack(side="left")
+        self.emoji_size_label = ttk.Label(size_row, text=f"{DEFAULT_EMOJI_SIZE}px")
+        self.emoji_size_label.pack(side="right")
+        self.emoji_size_var = tk.IntVar(value=DEFAULT_EMOJI_SIZE)
+        ttk.Scale(tab, from_=16, to=200, variable=self.emoji_size_var,
+                  command=self.on_emoji_size).pack(fill="x")
+
         ttk.Separator(tab).pack(fill="x", pady=12)
+        self.infer_emoji = ttk.Label(tab)  # 이모지를 핑크로 칠한 이미지로 표시
+        self.infer_emoji_key = None
+        self.infer_emoji.pack()
         self.infer_result = ttk.Label(tab, text="손을 보여주세요", style="Big.TLabel", justify="left")
         self.infer_result.pack(anchor="w")
         return tab
@@ -216,7 +290,8 @@ class GestureStudio:
         selected = self.selected_label()
         self.label_list.delete(0, "end")
         for label in self.labels:
-            self.label_list.insert("end", f"{label}   ({self.counts[label]})")
+            emoji = self.emojis.get(label, "")
+            self.label_list.insert("end", f"{emoji + ' ' if emoji else ''}{label}   ({self.counts[label]})")
         if selected in self.labels:
             self.label_list.selection_set(self.labels.index(selected))
         elif self.labels:
@@ -249,7 +324,24 @@ class GestureStudio:
             delete_label_rows(label)
         self.labels.remove(label)
         del self.counts[label]
+        if self.emojis.pop(label, None) is not None:
+            save_emojis(self.emojis)
         self.refresh_label_list()
+
+    def set_emoji(self, emoji):
+        label = self.selected_label()
+        if label is None:
+            messagebox.showinfo("안내", "먼저 라벨을 선택하세요.")
+            return
+        emoji = clean_emoji(emoji)
+        if emoji:
+            self.emojis[label] = emoji
+        else:
+            self.emojis.pop(label, None)
+        save_emojis(self.emojis)
+        self.emoji_entry.delete(0, "end")
+        self.refresh_label_list()
+        self.root.focus_set()  # Space가 입력창이 아닌 녹화로 가도록
 
     def on_space(self, event):
         if self.notebook.index("current") == TAB_COLLECT:
@@ -342,6 +434,32 @@ class GestureStudio:
         label = str(self.classifier.classes_[best]) if probs[best] >= self.conf_var.get() else "?"
         return label, probs[best]
 
+    def on_emoji_size(self, value):
+        size = int(float(value))
+        self.emoji_size_var.set(size)
+        self.emoji_size_label.config(text=f"{size}px")
+
+    def show_infer_emojis(self, emojis):
+        """[추론] 탭에 큰 이모지 표시 (바뀔 때만 다시 그림)"""
+        key = (tuple(emojis), self.emoji_size_var.get())
+        if key == self.infer_emoji_key:
+            return
+        self.infer_emoji_key = key
+        if not emojis:
+            self.infer_emoji_photo = None
+            self.infer_emoji.config(image="")
+            return
+        images = [render_emoji(e, key[1]) for e in emojis]
+        gap = 10
+        canvas = Image.new("RGBA", (sum(i.width for i in images) + gap * (len(images) - 1),
+                                    max(i.height for i in images)), (0, 0, 0, 0))
+        x = 0
+        for i in images:
+            canvas.alpha_composite(i, (x, 0))
+            x += i.width + gap
+        self.infer_emoji_photo = ImageTk.PhotoImage(canvas)
+        self.infer_emoji.config(image=self.infer_emoji_photo)
+
     # -------------------------------------------------------------- 메인 루프
     def update_frame(self):
         ok, frame = self.cap.read()
@@ -358,12 +476,13 @@ class GestureStudio:
         result = self.landmarker.detect_for_video(mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb), ts)
 
         tab = self.notebook.index("current")
-        overlays = []  # (위치, 글자, 색) - 한글 표시를 위해 PIL로 나중에 그림
+        overlays = []  # (위치, 글자, 색, 이모지) - 한글·이모지 표시를 위해 PIL로 나중에 그림
         hands = list(zip(result.hand_landmarks, result.handedness))
         if tab == TAB_COLLECT:
             hands = hands[:1]  # 수집은 한 손만
 
         infer_lines = []
+        infer_emojis = []
         for landmarks, handedness in hands:
             hand = handedness[0].category_name
             points = draw_hand(frame, landmarks)
@@ -376,19 +495,21 @@ class GestureStudio:
             elif tab == TAB_INFER and self.classifier is not None:
                 label, prob = self.predict(landmarks, hand)
                 x0 = min(p[0] for p in points)
-                y0 = max(min(p[1] for p in points) - 40, 0)
-                overlays.append(((x0, y0), f"{label} {prob:.2f}", (255, 255, 0)))
-                infer_lines.append(f"{hand}: {label} ({prob:.2f})")
+                emoji = self.emojis.get(label, "")
+                y0 = max(min(p[1] for p in points) - (self.emoji_size_var.get() if emoji else 28) - 12, 0)
+                overlays.append(((x0, y0), f"{label} {prob:.2f}", (255, 255, 0), emoji))
+                infer_lines.append(f"{hand}: {emoji + ' ' if emoji else ''}{label} ({prob:.2f})")
+                infer_emojis.append(emoji)
 
         if tab == TAB_COLLECT:
             self.update_collect_overlay(overlays, bool(hands))
         elif tab == TAB_INFER:
             self.infer_result.config(text="\n".join(infer_lines) or "손을 보여주세요")
+            self.show_infer_emojis([e for e in infer_emojis if e])
 
-        image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-        draw = ImageDraw.Draw(image)
-        for (x, y), text, color in overlays:
-            draw.text((x, y), text, font=font(28), fill=color, stroke_width=2, stroke_fill=(0, 0, 0))
+        image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGBA))
+        for pos, text, color, emoji in overlays:
+            draw_overlay(image, pos, text, color, emoji, emoji_size=self.emoji_size_var.get())
         self.photo = ImageTk.PhotoImage(image)  # 참조를 유지해야 화면에 남음
         self.video.config(image=self.photo)
 
@@ -406,13 +527,15 @@ class GestureStudio:
             self.rec_progress.config(value=self.session_count)
             if self.session_count % 30 == 0:
                 self.refresh_label_list()
-            overlays.append(((10, 8), f"● REC  {label}  {self.session_count}/{target}", (255, 60, 60)))
+            overlays.append(((10, 8), f"● REC  {label}  {self.session_count}/{target}", (255, 60, 60),
+                             self.emojis.get(label, "")))
             if not hand_visible:
-                overlays.append(((10, 48), "손이 보이지 않음", (255, 200, 0)))
+                overlays.append(((10, 48), "손이 보이지 않음", (255, 200, 0), ""))
             if self.session_count >= target:
                 self.stop_recording()
         elif label is not None:
-            overlays.append(((10, 8), f"대기 중  {label}  (Space로 녹화)", (220, 220, 220)))
+            overlays.append(((10, 8), f"대기 중  {label}  (Space로 녹화)", (220, 220, 220),
+                             self.emojis.get(label, "")))
 
     def on_close(self):
         self.root.after_cancel(self.after_id)

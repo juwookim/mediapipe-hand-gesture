@@ -2,6 +2,15 @@
 
 MediaPipe Tasks API로 웹캠 영상에서 손 랜드마크·손 제스처·얼굴 랜드마크를 실시간으로 인식하는 파이썬 예제입니다.
 
+## 🌐 브라우저 데모
+
+**https://juwookim.github.io/mediapipe-hand-gesture/**
+
+설치 없이 브라우저에서 기본 제스처 인식과 커스텀 제스처 수집 → 훈련 → 추론을 해볼 수 있습니다(`docs/` 폴더, GitHub Pages).
+- 영상은 브라우저 안에서만 처리되고, 수집 데이터·모델은 그 브라우저의 localStorage에만 저장됩니다.
+- [수집] 탭의 *데이터 가져오기*로 파이썬에서 모은 `dataset/custom_gestures.csv`를 그대로 불러올 수 있습니다.
+- 라벨별 이모지, 이모지 크기 슬라이더, 핑크/원래 색 전환을 지원합니다.
+
 ## 작업 내역 (2026-10-07)
 
 1. **Hand Landmarker** — `hand_landmarker.task` 모델을 받고, 웹캠에서 손 21개 관절점과 좌/우 손을 표시하는 `hand_webcam.py`를 작성했습니다.
@@ -71,6 +80,7 @@ python custom_gesture_webcam.py
 - 다시 실행하면 수집 데이터는 기존 CSV 뒤에 추가됩니다. 처음부터 다시 하려면 `dataset/custom_gestures.csv`를 지우세요.
 - 왼손 좌표를 좌우 반전해 오른손 모양으로 맞추므로, 한쪽 손으로만 모아도 양손 모두 인식합니다.
 - 확률이 `MIN_CONFIDENCE`(기본 0.7)보다 낮으면 `?`로 표시합니다.
+- `gesture_studio.py`의 [수집] 탭에서 라벨마다 이모지를 지정할 수 있습니다(`dataset/label_emojis.json`에 저장). [추론] 탭의 **이모지 크기** 슬라이더로 크기를 바꾸고, 색은 `EMOJI_TINT`(기본 핑크, `None`이면 원래 색)로 정합니다.
 
 ## 참고 사항
 
