@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 .venv/
 
+dataset/
+custom_gesture_model.joblib

@@ -16,6 +16,11 @@ MediaPipe Tasks API로 웹캠 영상에서 손 랜드마크·손 제스처·얼�
 | `hand_webcam.py` | 손 랜드마크 검출 (관절점·뼈대, Left/Right 라벨, FPS) |
 | `gesture_webcam.py` | 제스처 인식 (뼈대 + 제스처 이름·점수, Left/Right 라벨, FPS) |
 | `face_webcam.py` | 얼굴 랜드마크 (478점 메시·눈/입/눈썹/홍채 윤곽, 상위 8개 blendshape 막대, FPS) |
+| `gesture_studio.py` | 커스텀 제스처 수집·훈련·추론 통합 UI (Tkinter) |
+| `gesture_features.py` | 커스텀 제스처 공통 코드 (랜드마크 → 63차원 특징 변환) |
+| `collect_gestures.py` | 커스텀 제스처 데이터 수집 → `dataset/custom_gestures.csv` |
+| `train_gestures.py` | 커스텀 제스처 분류기 훈련 → `custom_gesture_model.joblib` |
+| `custom_gesture_webcam.py` | 훈련한 커스텀 제스처 실시간 추론 |
 | `hand_landmarker.task` | Hand Landmarker 모델 |
 | `gesture_recognizer.task` | Gesture Recognizer 모델 |
 | `face_landmarker.task` | Face Landmarker 모델 |
@@ -37,6 +42,35 @@ python face_webcam.py      # 얼굴 랜드마크 (m: 메시 표시 전환)
 종료하려면 `q` 또는 `ESC`를 누르세요.
 
 테스트 환경: Windows 10, Python 3.14, mediapipe 1.1.0, opencv-python 5.0
+
+## 커스텀 제스처 학습
+
+Hand Landmarker로 손 21개 관절점을 뽑고, 그 좌표로 작은 신경망(scikit-learn MLP)을 훈련합니다.
+(MediaPipe 공식 Model Maker는 TensorFlow가 필요해서 Python 3.14에서 쓸 수 없습니다.)
+
+```bash
+pip install scikit-learn
+
+# UI로 한 번에: [수집] → [훈련] → [추론] 탭 순서로 진행
+python gesture_studio.py
+
+# 또는 CLI로 단계별 실행
+
+# 1) 수집: 라벨을 명령행에 적기 (최대 9개). 아무 제스처도 아닌 손 모양용 'none'을 꼭 넣으세요
+python collect_gestures.py heart ok call none
+#    1~9: 라벨 선택 · SPACE: 녹화 시작/정지 · q/ESC: 종료
+#    라벨마다 200~500개 정도 모으기. 녹화하면서 손 각도·거리·위치를 조금씩 바꾸기
+
+# 2) 훈련: 정확도·혼동 행렬을 출력하고 모델 저장
+python train_gestures.py
+
+# 3) 추론
+python custom_gesture_webcam.py
+```
+
+- 다시 실행하면 수집 데이터는 기존 CSV 뒤에 추가됩니다. 처음부터 다시 하려면 `dataset/custom_gestures.csv`를 지우세요.
+- 왼손 좌표를 좌우 반전해 오른손 모양으로 맞추므로, 한쪽 손으로만 모아도 양손 모두 인식합니다.
+- 확률이 `MIN_CONFIDENCE`(기본 0.7)보다 낮으면 `?`로 표시합니다.
 
 ## 참고 사항
 
